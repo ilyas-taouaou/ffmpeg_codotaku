@@ -1,14 +1,20 @@
-#include <algorithm>
-#include <iostream>
-#include <span>
-
+#pragma warning(push, 0)
 extern "C" {
 #include <libavutil/mem.h>
 #include <libavformat/avformat.h>
 }
+#pragma warning(pop)
 
+#include <algorithm>
+#include <iostream>
+#include <span>
 #include <vector>
 #include <print>
+
+#pragma warning(push)
+#pragma warning(disable : 4365)
+#pragma warning(disable : 4388)
+#pragma warning(disable : 5045)
 
 struct Args {
     char const *input_filename;
@@ -52,23 +58,23 @@ std::vector<std::optional<int>> copy_streams(AVFormatContext const *input_format
 
     for (std::span const input_streams{input_format_context->streams, input_format_context->nb_streams}; auto const &
          in_stream : input_streams) {
-        auto const in_codecpar = in_stream->codecpar;
+        auto const input_codec_parameters{in_stream->codecpar};
 
-        if (std::ranges::find(relevant_media_types, in_codecpar->codec_type) == relevant_media_types.end()) {
+        if (std::ranges::find(relevant_media_types, input_codec_parameters->codec_type) == relevant_media_types.end()) {
             stream_mapping[in_stream->index] = std::nullopt;
             continue;
         }
 
         stream_mapping[in_stream->index] = in_stream->index;
 
-        auto const out_stream{avformat_new_stream(output_format_context, nullptr)};
-        if (!out_stream)
+        auto const output_stream{avformat_new_stream(output_format_context, nullptr)};
+        if (!output_stream)
             throw std::runtime_error("Failed allocating output stream");
 
-        if (avcodec_parameters_copy(out_stream->codecpar, in_codecpar) < 0)
+        if (avcodec_parameters_copy(output_stream->codecpar, input_codec_parameters) < 0)
             throw std::runtime_error("Failed to copy codec parameters");
 
-        out_stream->codecpar->codec_tag = 0;
+        output_stream->codecpar->codec_tag = 0;
     }
 
     return stream_mapping;
@@ -76,7 +82,7 @@ std::vector<std::optional<int>> copy_streams(AVFormatContext const *input_format
 
 void remux_packets(AVFormatContext *input_format_context, AVFormatContext *output_format_context,
                    const std::vector<std::optional<int>> &stream_mapping) {
-    auto const packet = av_packet_alloc();
+    auto const packet{av_packet_alloc()};
     if (!packet)
         throw std::runtime_error("Could not allocate AVPacket");
 
@@ -93,7 +99,7 @@ void remux_packets(AVFormatContext *input_format_context, AVFormatContext *outpu
         packet->stream_index = stream_mapping[packet->stream_index].value();
 
         auto const input_stream{input_streams[packet->stream_index]};
-        auto const output_stream = output_streams[packet->stream_index];
+        auto const output_stream{output_streams[packet->stream_index]};
         av_packet_rescale_ts(packet, input_stream->time_base, output_stream->time_base);
         packet->pos = -1;
 
@@ -122,8 +128,10 @@ void remux_video(const char *input_filename, const char *output_filename,
     auto const input_format_context{load_input_video(input_filename)};
     auto const output_format_context{create_output_video(output_filename)};
 
-    auto const stream_mapping = copy_streams(input_format_context, output_format_context,
-                                             relevant_media_types);
+    auto const stream_mapping{
+        copy_streams(input_format_context, output_format_context,
+                     relevant_media_types)
+    };
 
     open_output_file(output_format_context, output_filename);
     remux_packets(input_format_context, output_format_context, stream_mapping);
@@ -131,7 +139,9 @@ void remux_video(const char *input_filename, const char *output_filename,
 }
 
 int main(int const argc, char **argv) {
-    auto const [input_filename, output_filename] = parse_args(argc, argv);
+    auto const [input_filename, output_filename]{parse_args(argc, argv)};
     remux_video(input_filename, output_filename, {AVMEDIA_TYPE_AUDIO, AVMEDIA_TYPE_VIDEO, AVMEDIA_TYPE_SUBTITLE});
     return EXIT_SUCCESS;
 }
+
+#pragma warning(pop)
