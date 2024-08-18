@@ -52,7 +52,7 @@ std::vector<std::optional<int>> copy_streams(AVFormatContext const *input_format
 
     for (std::span const input_streams{input_format_context->streams, input_format_context->nb_streams}; auto const &
          in_stream : input_streams) {
-        AVCodecParameters const *in_codecpar = in_stream->codecpar;
+        auto const in_codecpar = in_stream->codecpar;
 
         if (std::ranges::find(relevant_media_types, in_codecpar->codec_type) == relevant_media_types.end()) {
             stream_mapping[in_stream->index] = std::nullopt;
@@ -76,7 +76,7 @@ std::vector<std::optional<int>> copy_streams(AVFormatContext const *input_format
 
 void remux_packets(AVFormatContext *input_format_context, AVFormatContext *output_format_context,
                    const std::vector<std::optional<int>> &stream_mapping) {
-    AVPacket *packet = av_packet_alloc();
+    auto const packet = av_packet_alloc();
     if (!packet)
         throw std::runtime_error("Could not allocate AVPacket");
 
@@ -84,7 +84,6 @@ void remux_packets(AVFormatContext *input_format_context, AVFormatContext *outpu
     std::span const output_streams{output_format_context->streams, output_format_context->nb_streams};
 
     while (av_read_frame(input_format_context, packet) >= 0) {
-        AVStream const *input_stream = input_streams[packet->stream_index];
         if (packet->stream_index >= stream_mapping.size() ||
             !stream_mapping[packet->stream_index]) {
             av_packet_unref(packet);
@@ -92,8 +91,9 @@ void remux_packets(AVFormatContext *input_format_context, AVFormatContext *outpu
         }
 
         packet->stream_index = stream_mapping[packet->stream_index].value();
-        AVStream const *output_stream = output_streams[packet->stream_index];
 
+        auto const input_stream{input_streams[packet->stream_index]};
+        auto const output_stream = output_streams[packet->stream_index];
         av_packet_rescale_ts(packet, input_stream->time_base, output_stream->time_base);
         packet->pos = -1;
 
