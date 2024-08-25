@@ -1,4 +1,6 @@
 #pragma warning(push, 0)
+#include <map>
+
 extern "C" {
 #include <libavutil/mem.h>
 #include <libavformat/avformat.h>
@@ -8,7 +10,6 @@ extern "C" {
 #include <algorithm>
 #include <iostream>
 #include <span>
-#include <vector>
 #include <print>
 
 #pragma warning(push)
@@ -51,21 +52,22 @@ AVFormatContext* create_output_video(const char *output_filename) {
     return output_format_context;
 }
 
-std::vector<std::optional<int>> copy_streams(AVFormatContext const *input_format_context,
-                                             AVFormatContext *output_format_context,
-                                             std::initializer_list<AVMediaType> relevant_media_types) {
-    std::vector<std::optional<int>> stream_mapping(input_format_context->nb_streams);
+std::map<int, int> copy_streams(AVFormatContext const *input_format_context,
+                                AVFormatContext *output_format_context,
+                                std::initializer_list<AVMediaType> relevant_media_types) {
+    std::map<int, int> stream_mapping;
+    int i{};
 
     for (std::span const input_streams{input_format_context->streams, input_format_context->nb_streams}; auto const &
          in_stream : input_streams) {
         auto const input_codec_parameters{in_stream->codecpar};
 
         if (std::ranges::find(relevant_media_types, input_codec_parameters->codec_type) == relevant_media_types.end()) {
-            stream_mapping[in_stream->index] = std::nullopt;
+            i += 1;
             continue;
         }
 
-        stream_mapping[in_stream->index] = in_stream->index;
+        stream_mapping[in_stream->index] = in_stream->index - i;
 
         auto const output_stream{avformat_new_stream(output_format_context, nullptr)};
         if (!output_stream)
@@ -81,7 +83,7 @@ std::vector<std::optional<int>> copy_streams(AVFormatContext const *input_format
 }
 
 void remux_packets(AVFormatContext *input_format_context, AVFormatContext *output_format_context,
-                   const std::vector<std::optional<int>> &stream_mapping) {
+                   const std::map<int, int> &stream_mapping) {
     auto const packet{av_packet_alloc()};
     if (!packet)
         throw std::runtime_error("Could not allocate AVPacket");
@@ -91,12 +93,12 @@ void remux_packets(AVFormatContext *input_format_context, AVFormatContext *outpu
 
     while (av_read_frame(input_format_context, packet) >= 0) {
         if (packet->stream_index >= stream_mapping.size() ||
-            !stream_mapping[packet->stream_index]) {
+            !stream_mapping.contains(packet->stream_index)) {
             av_packet_unref(packet);
             continue;
         }
 
-        packet->stream_index = stream_mapping[packet->stream_index].value();
+        packet->stream_index = stream_mapping.at(packet->stream_index);
 
         auto const input_stream{input_streams[packet->stream_index]};
         auto const output_stream{output_streams[packet->stream_index]};
